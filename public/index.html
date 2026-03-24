@@ -871,10 +871,10 @@
         const facultySelect = document.getElementById(`${assignment.id}-faculty`);
 
         if (courseSelect) {
-          const currentValue = courseSelect.value;
+          // FIX: read from data model, not DOM — DOM value is "" on initial load from saved project
+          const currentValue = assignment.courseId || '';
           courseSelect.innerHTML = '<option value="">-- Select Course --</option>';
 
-          // Check if current value still exists in available courses
           let currentCourseStillExists = false;
 
           standards.forEach(standard => {
@@ -893,17 +893,16 @@
             });
           });
 
-          // Clear the assignment if course no longer exists
           if (!currentCourseStillExists && currentValue !== '') {
             assignment.courseId = '';
           }
         }
 
         if (facultySelect) {
-          const currentFacultyValue = facultySelect.value;
+          // FIX: read from data model, not DOM
+          const currentFacultyValue = assignment.facultyId || '';
           facultySelect.innerHTML = '<option value="">-- Select Faculty --</option>';
 
-          // Check if current value still exists in faculty list
           const currentFacultyStillExists = faculty.some(f => f.id === currentFacultyValue);
 
           faculty.forEach(fac => {
@@ -917,7 +916,6 @@
             facultySelect.appendChild(option);
           });
 
-          // Clear the assignment if faculty no longer exists
           if (!currentFacultyStillExists && currentFacultyValue !== '') {
             assignment.facultyId = '';
           }
@@ -1080,15 +1078,23 @@
               <option value="">-- Select Faculty --</option>${facultyOptionsHtml(c.facultyId)}
             </select></div>
           <div style="font-size:12px;color:#64748b;padding-top:20px;">Uses the break time set above to determine first half.</div>`;
+      } else if (c.type === 'faculty_second_half_only') {
+        fieldsHtml = `
+          <div><label>Faculty (only available after break)</label>
+            <select onchange="updateHC(${ci},'facultyId',this.value)">
+              <option value="">-- Select Faculty --</option>${facultyOptionsHtml(c.facultyId)}
+            </select></div>
+          <div style="font-size:12px;color:#64748b;padding-top:20px;">Uses the break time set above to determine second half.</div>`;
       }
 
       card.innerHTML = `
         <div style="display:flex;align-items:center;gap:12px;margin-bottom:12px;flex-wrap:wrap;">
           <label style="margin:0;white-space:nowrap;">Constraint Type</label>
           <select style="flex:1;min-width:220px;" onchange="updateHCType(${ci},this.value)">
-            <option value="faculty_unavailability" ${c.type==='faculty_unavailability'?'selected':''}>Faculty Unavailability</option>
-            <option value="room_restriction"       ${c.type==='room_restriction'?'selected':''}>Room Restriction for Course</option>
-            <option value="faculty_first_half_only" ${c.type==='faculty_first_half_only'?'selected':''}>Faculty Available First Half Only</option>
+            <option value="faculty_unavailability"   ${c.type==='faculty_unavailability'?'selected':''}>Faculty Unavailability</option>
+            <option value="room_restriction"         ${c.type==='room_restriction'?'selected':''}>Room Restriction for Course</option>
+            <option value="faculty_first_half_only"  ${c.type==='faculty_first_half_only'?'selected':''}>Faculty Available First Half Only</option>
+            <option value="faculty_second_half_only" ${c.type==='faculty_second_half_only'?'selected':''}>Faculty Available Second Half Only</option>
           </select>
         </div>
         <div class="grid">${fieldsHtml}</div>
@@ -1143,6 +1149,12 @@
             <select onchange="updateSC(${ci},'facultyId',this.value)">
               <option value="">-- Select Faculty --</option>${facultyOptionsHtml(c.facultyId)}
             </select></div>`;
+      } else if (c.type === 'faculty_prefers_second_half') {
+        fieldsHtml = `
+          <div><label>Faculty</label>
+            <select onchange="updateSC(${ci},'facultyId',this.value)">
+              <option value="">-- Select Faculty --</option>${facultyOptionsHtml(c.facultyId)}
+            </select></div>`;
       } else if (c.type === 'no_back_to_back_course') {
         fieldsHtml = `<div style="font-size:12px;color:#64748b;padding-top:20px;">Applies to all courses and standards — penalises any course taught to the same standard in consecutive timeslots on the same day.</div>`;
       } else if (c.type === 'balanced_daily_load') {
@@ -1165,10 +1177,11 @@
         <div style="display:flex;align-items:center;gap:12px;margin-bottom:12px;flex-wrap:wrap;">
           <label style="margin:0;white-space:nowrap;">Constraint Type</label>
           <select style="flex:1;min-width:220px;" onchange="updateSCType(${ci},this.value)">
-            <option value="faculty_prefers_first_half" ${c.type==='faculty_prefers_first_half'?'selected':''}>Faculty Prefers First Half</option>
-            <option value="no_back_to_back_course"     ${c.type==='no_back_to_back_course'?'selected':''}>No Back-to-Back Same Course (same standard)</option>
-            <option value="balanced_daily_load"        ${c.type==='balanced_daily_load'?'selected':''}>Balanced Daily Load for Faculty</option>
-            <option value="course_preferred_slot"      ${c.type==='course_preferred_slot'?'selected':''}>Course Preferred Timeslot</option>
+            <option value="faculty_prefers_first_half"  ${c.type==='faculty_prefers_first_half'?'selected':''}>Faculty Prefers First Half</option>
+            <option value="faculty_prefers_second_half" ${c.type==='faculty_prefers_second_half'?'selected':''}>Faculty Prefers Second Half</option>
+            <option value="no_back_to_back_course"      ${c.type==='no_back_to_back_course'?'selected':''}>No Back-to-Back Same Course (same standard)</option>
+            <option value="balanced_daily_load"         ${c.type==='balanced_daily_load'?'selected':''}>Balanced Daily Load for Faculty</option>
+            <option value="course_preferred_slot"       ${c.type==='course_preferred_slot'?'selected':''}>Course Preferred Timeslot</option>
           </select>
           <div style="display:flex;align-items:center;gap:6px;">
             <label style="margin:0;white-space:nowrap;font-size:12px;">Weight</label>

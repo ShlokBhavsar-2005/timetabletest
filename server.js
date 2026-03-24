@@ -21,7 +21,7 @@ const USERS_FILE    = path.join(__dirname, 'users.json');
 // MIDDLEWARE
 // ─────────────────────────────────────────────
 app.use(cors({
-  origin: true,   // reflects request origin — safe because auth is JWT-gated
+  origin: true,
   credentials: true
 }));
 app.use(express.json({ limit: '50mb' }));
