@@ -1,0 +1,606 @@
+[
+  {
+    "id": "proj_1773247520878",
+    "name": "trial1",
+    "createdAt": "2026-03-11T16:45:20.878Z",
+    "updatedAt": "2026-03-24T07:16:50.727Z",
+    "standards": [
+      {
+        "id": "standard-1773288171388",
+        "name": "1",
+        "courses": [
+          {
+            "id": "course-1773288174090",
+            "name": "math",
+            "courseCode": "MA101"
+          },
+          {
+            "id": "course-1773288183347",
+            "name": "sci",
+            "courseCode": "SC101"
+          },
+          {
+            "id": "course-1773288241778",
+            "name": "eng",
+            "courseCode": "EN101"
+          },
+          {
+            "id": "course-1773288294532",
+            "name": "hindi",
+            "courseCode": "HI101"
+          }
+        ]
+      },
+      {
+        "id": "standard-1773288381118",
+        "name": "2",
+        "courses": [
+          {
+            "id": "course-1773288382764",
+            "name": "maths",
+            "courseCode": "MA201"
+          },
+          {
+            "id": "course-1773288459985",
+            "name": "sci",
+            "courseCode": "SC201"
+          },
+          {
+            "id": "course-1773288471860",
+            "name": "eng",
+            "courseCode": "EN201"
+          },
+          {
+            "id": "course-1773288479416",
+            "name": "hindi",
+            "courseCode": "HI201"
+          }
+        ]
+      }
+    ],
+    "faculty": [
+      {
+        "id": "faculty-1773288509980",
+        "name": "Shlok ",
+        "facultyCode": "01"
+      },
+      {
+        "id": "faculty-1773288560517",
+        "name": "Rishi ",
+        "facultyCode": "02"
+      },
+      {
+        "id": "faculty-1773288571705",
+        "name": "Shubhankar",
+        "facultyCode": "03"
+      },
+      {
+        "id": "faculty-1773288584908",
+        "name": "Tanmay",
+        "facultyCode": "04"
+      }
+    ],
+    "assignments": [
+      {
+        "id": "asgn-1773247532882",
+        "courseId": "course-1773288174090",
+        "facultyId": "faculty-1773288509980",
+        "timesPerWeek": 3
+      },
+      {
+        "id": "assignment-1773288775552",
+        "courseId": "course-1773288183347",
+        "facultyId": "faculty-1773288560517",
+        "timesPerWeek": 3
+      },
+      {
+        "id": "assignment-1773288782274",
+        "courseId": "course-1773288241778",
+        "facultyId": "faculty-1773288571705",
+        "timesPerWeek": 3
+      },
+      {
+        "id": "assignment-1773288787901",
+        "courseId": "course-1773288294532",
+        "facultyId": "faculty-1773288584908",
+        "timesPerWeek": 3
+      },
+      {
+        "id": "assignment-1773288795824",
+        "courseId": "course-1773288382764",
+        "facultyId": "faculty-1773288509980",
+        "timesPerWeek": 3
+      },
+      {
+        "id": "assignment-1773288801223",
+        "courseId": "course-1773288459985",
+        "facultyId": "faculty-1773288560517",
+        "timesPerWeek": 3
+      },
+      {
+        "id": "assignment-1773288806586",
+        "courseId": "course-1773288471860",
+        "facultyId": "faculty-1773288571705",
+        "timesPerWeek": 3
+      },
+      {
+        "id": "assignment-1773288813684",
+        "courseId": "course-1773288479416",
+        "facultyId": "faculty-1773288584908",
+        "timesPerWeek": 3
+      }
+    ],
+    "classrooms": [
+      "1001",
+      "1002"
+    ],
+    "selectedDays": [
+      "Monday",
+      "Tuesday",
+      "Wednesday",
+      "Thursday",
+      "Friday",
+      "Saturday"
+    ],
+    "timeSlotValues": [
+      {
+        "startTime": "13:00",
+        "endTime": "14:00"
+      },
+      {
+        "startTime": "15:00",
+        "endTime": "16:00"
+      }
+    ],
+    "hardConstraints": [
+      {
+        "id": "hard-1773294156264",
+        "type": "faculty_unavailability",
+        "facultyId": "faculty-1773288509980",
+        "day": "Monday",
+        "timeslot": "",
+        "courseId": "",
+        "classroom": ""
+      },
+      {
+        "id": "hard-1774334828067",
+        "type": "room_restriction",
+        "facultyId": "",
+        "day": "",
+        "timeslot": "",
+        "courseId": "course-1773288174090",
+        "classroom": "1001"
+      },
+      {
+        "id": "hard-1774334866321",
+        "type": "faculty_first_half_only",
+        "facultyId": "faculty-1773288560517",
+        "day": "",
+        "timeslot": "",
+        "courseId": "",
+        "classroom": ""
+      }
+    ],
+    "softConstraints": [
+      {
+        "id": "soft-1774006959990",
+        "type": "no_back_to_back_course",
+        "facultyId": "",
+        "courseId": "",
+        "preference": "morning",
+        "weight": 50,
+        "label": ""
+      },
+      {
+        "id": "soft-1774010590586",
+        "type": "faculty_prefers_first_half",
+        "facultyId": "faculty-1773288509980",
+        "courseId": "",
+        "preference": "morning",
+        "weight": 50,
+        "label": ""
+      },
+      {
+        "id": "soft-1774010637780",
+        "type": "balanced_daily_load",
+        "facultyId": "",
+        "courseId": "",
+        "preference": "morning",
+        "weight": 50,
+        "label": ""
+      }
+    ],
+    "scheduleData": {
+      "Monday": [
+        {
+          "timeSlot": {
+            "startTime": "13:00",
+            "endTime": "14:00"
+          },
+          "startTime": "13:00",
+          "endTime": "14:00",
+          "standard": "1",
+          "course": "hindi",
+          "courseCode": "HI101",
+          "faculty": "Tanmay",
+          "facultyCode": "04",
+          "classroom": "1002"
+        },
+        {
+          "timeSlot": {
+            "startTime": "13:00",
+            "endTime": "14:00"
+          },
+          "startTime": "13:00",
+          "endTime": "14:00",
+          "standard": "2",
+          "course": "sci",
+          "courseCode": "SC201",
+          "faculty": "Rishi ",
+          "facultyCode": "02",
+          "classroom": "1001"
+        },
+        {
+          "timeSlot": {
+            "startTime": "15:00",
+            "endTime": "16:00"
+          },
+          "startTime": "15:00",
+          "endTime": "16:00",
+          "standard": "1",
+          "course": "eng",
+          "courseCode": "EN101",
+          "faculty": "Shubhankar",
+          "facultyCode": "03",
+          "classroom": "1002"
+        },
+        {
+          "timeSlot": {
+            "startTime": "15:00",
+            "endTime": "16:00"
+          },
+          "startTime": "15:00",
+          "endTime": "16:00",
+          "standard": "2",
+          "course": "hindi",
+          "courseCode": "HI201",
+          "faculty": "Tanmay",
+          "facultyCode": "04",
+          "classroom": "1001"
+        }
+      ],
+      "Tuesday": [
+        {
+          "timeSlot": {
+            "startTime": "13:00",
+            "endTime": "14:00"
+          },
+          "startTime": "13:00",
+          "endTime": "14:00",
+          "standard": "1",
+          "course": "sci",
+          "courseCode": "SC101",
+          "faculty": "Rishi ",
+          "facultyCode": "02",
+          "classroom": "1001"
+        },
+        {
+          "timeSlot": {
+            "startTime": "13:00",
+            "endTime": "14:00"
+          },
+          "startTime": "13:00",
+          "endTime": "14:00",
+          "standard": "2",
+          "course": "hindi",
+          "courseCode": "HI201",
+          "faculty": "Tanmay",
+          "facultyCode": "04",
+          "classroom": "1002"
+        },
+        {
+          "timeSlot": {
+            "startTime": "15:00",
+            "endTime": "16:00"
+          },
+          "startTime": "15:00",
+          "endTime": "16:00",
+          "standard": "1",
+          "course": "math",
+          "courseCode": "MA101",
+          "faculty": "Shlok ",
+          "facultyCode": "01",
+          "classroom": "1001"
+        },
+        {
+          "timeSlot": {
+            "startTime": "15:00",
+            "endTime": "16:00"
+          },
+          "startTime": "15:00",
+          "endTime": "16:00",
+          "standard": "2",
+          "course": "eng",
+          "courseCode": "EN201",
+          "faculty": "Shubhankar",
+          "facultyCode": "03",
+          "classroom": "1002"
+        }
+      ],
+      "Wednesday": [
+        {
+          "timeSlot": {
+            "startTime": "13:00",
+            "endTime": "14:00"
+          },
+          "startTime": "13:00",
+          "endTime": "14:00",
+          "standard": "1",
+          "course": "sci",
+          "courseCode": "SC101",
+          "faculty": "Rishi ",
+          "facultyCode": "02",
+          "classroom": "1002"
+        },
+        {
+          "timeSlot": {
+            "startTime": "13:00",
+            "endTime": "14:00"
+          },
+          "startTime": "13:00",
+          "endTime": "14:00",
+          "standard": "2",
+          "course": "maths",
+          "courseCode": "MA201",
+          "faculty": "Shlok ",
+          "facultyCode": "01",
+          "classroom": "1001"
+        },
+        {
+          "timeSlot": {
+            "startTime": "15:00",
+            "endTime": "16:00"
+          },
+          "startTime": "15:00",
+          "endTime": "16:00",
+          "standard": "1",
+          "course": "hindi",
+          "courseCode": "HI101",
+          "faculty": "Tanmay",
+          "facultyCode": "04",
+          "classroom": "1002"
+        },
+        {
+          "timeSlot": {
+            "startTime": "15:00",
+            "endTime": "16:00"
+          },
+          "startTime": "15:00",
+          "endTime": "16:00",
+          "standard": "2",
+          "course": "maths",
+          "courseCode": "MA201",
+          "faculty": "Shlok ",
+          "facultyCode": "01",
+          "classroom": "1001"
+        }
+      ],
+      "Thursday": [
+        {
+          "timeSlot": {
+            "startTime": "13:00",
+            "endTime": "14:00"
+          },
+          "startTime": "13:00",
+          "endTime": "14:00",
+          "standard": "1",
+          "course": "eng",
+          "courseCode": "EN101",
+          "faculty": "Shubhankar",
+          "facultyCode": "03",
+          "classroom": "1002"
+        },
+        {
+          "timeSlot": {
+            "startTime": "13:00",
+            "endTime": "14:00"
+          },
+          "startTime": "13:00",
+          "endTime": "14:00",
+          "standard": "2",
+          "course": "sci",
+          "courseCode": "SC201",
+          "faculty": "Rishi ",
+          "facultyCode": "02",
+          "classroom": "1001"
+        },
+        {
+          "timeSlot": {
+            "startTime": "15:00",
+            "endTime": "16:00"
+          },
+          "startTime": "15:00",
+          "endTime": "16:00",
+          "standard": "1",
+          "course": "math",
+          "courseCode": "MA101",
+          "faculty": "Shlok ",
+          "facultyCode": "01",
+          "classroom": "1001"
+        },
+        {
+          "timeSlot": {
+            "startTime": "15:00",
+            "endTime": "16:00"
+          },
+          "startTime": "15:00",
+          "endTime": "16:00",
+          "standard": "2",
+          "course": "eng",
+          "courseCode": "EN201",
+          "faculty": "Shubhankar",
+          "facultyCode": "03",
+          "classroom": "1002"
+        }
+      ],
+      "Friday": [
+        {
+          "timeSlot": {
+            "startTime": "13:00",
+            "endTime": "14:00"
+          },
+          "startTime": "13:00",
+          "endTime": "14:00",
+          "standard": "1",
+          "course": "sci",
+          "courseCode": "SC101",
+          "faculty": "Rishi ",
+          "facultyCode": "02",
+          "classroom": "1002"
+        },
+        {
+          "timeSlot": {
+            "startTime": "13:00",
+            "endTime": "14:00"
+          },
+          "startTime": "13:00",
+          "endTime": "14:00",
+          "standard": "2",
+          "course": "maths",
+          "courseCode": "MA201",
+          "faculty": "Shlok ",
+          "facultyCode": "01",
+          "classroom": "1001"
+        },
+        {
+          "timeSlot": {
+            "startTime": "15:00",
+            "endTime": "16:00"
+          },
+          "startTime": "15:00",
+          "endTime": "16:00",
+          "standard": "1",
+          "course": "eng",
+          "courseCode": "EN101",
+          "faculty": "Shubhankar",
+          "facultyCode": "03",
+          "classroom": "1002"
+        },
+        {
+          "timeSlot": {
+            "startTime": "15:00",
+            "endTime": "16:00"
+          },
+          "startTime": "15:00",
+          "endTime": "16:00",
+          "standard": "2",
+          "course": "hindi",
+          "courseCode": "HI201",
+          "faculty": "Tanmay",
+          "facultyCode": "04",
+          "classroom": "1001"
+        }
+      ],
+      "Saturday": [
+        {
+          "timeSlot": {
+            "startTime": "13:00",
+            "endTime": "14:00"
+          },
+          "startTime": "13:00",
+          "endTime": "14:00",
+          "standard": "1",
+          "course": "math",
+          "courseCode": "MA101",
+          "faculty": "Shlok ",
+          "facultyCode": "01",
+          "classroom": "1001"
+        },
+        {
+          "timeSlot": {
+            "startTime": "13:00",
+            "endTime": "14:00"
+          },
+          "startTime": "13:00",
+          "endTime": "14:00",
+          "standard": "2",
+          "course": "sci",
+          "courseCode": "SC201",
+          "faculty": "Rishi ",
+          "facultyCode": "02",
+          "classroom": "1002"
+        },
+        {
+          "timeSlot": {
+            "startTime": "15:00",
+            "endTime": "16:00"
+          },
+          "startTime": "15:00",
+          "endTime": "16:00",
+          "standard": "1",
+          "course": "hindi",
+          "courseCode": "HI101",
+          "faculty": "Tanmay",
+          "facultyCode": "04",
+          "classroom": "1002"
+        },
+        {
+          "timeSlot": {
+            "startTime": "15:00",
+            "endTime": "16:00"
+          },
+          "startTime": "15:00",
+          "endTime": "16:00",
+          "standard": "2",
+          "course": "eng",
+          "courseCode": "EN201",
+          "faculty": "Shubhankar",
+          "facultyCode": "03",
+          "classroom": "1001"
+        }
+      ]
+    },
+    "scheduleStats": {
+      "conflicts": 0,
+      "fitness": "320.00",
+      "classCount": 24,
+      "softReport": [
+        {
+          "id": "soft-1774006959990",
+          "type": "no_back_to_back_course",
+          "label": "no_back_to_back_course",
+          "weight": 50,
+          "violations": 1,
+          "total": 1,
+          "satisfied": false,
+          "detail": "1 back-to-back occurrence(s) found"
+        },
+        {
+          "id": "soft-1774010590586",
+          "type": "faculty_prefers_first_half",
+          "label": "faculty_prefers_first_half",
+          "weight": 50,
+          "violations": 3,
+          "total": 6,
+          "satisfied": false,
+          "detail": "Shlok : 3/6 classes in first half"
+        },
+        {
+          "id": "soft-1774010637780",
+          "type": "balanced_daily_load",
+          "label": "balanced_daily_load",
+          "weight": 50,
+          "violations": 0,
+          "total": 24,
+          "satisfied": true,
+          "detail": "Faculty load is well balanced"
+        }
+      ]
+    },
+    "generatedFilename": "timetable_1774335013185.xlsx",
+    "breakTime": {
+      "start": "14:00",
+      "end": "15:00"
+    }
+  }
+]

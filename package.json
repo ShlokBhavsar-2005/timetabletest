@@ -1,0 +1,26 @@
+{
+  "name": "timetable-generator",
+  "version": "1.0.0",
+  "description": "Intelligent Timetable Generator using Genetic Algorithm",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node server.js"
+  },
+  "keywords": [
+    "timetable",
+    "genetic-algorithm",
+    "scheduling",
+    "optimization"
+  ],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "express": "^4.18.2",
+    "cors": "^2.8.5",
+    "exceljs": "^4.3.0",
+    "bcryptjs": "^2.4.3",
+    "jsonwebtoken": "^9.0.2"
+  },
+  "devDependencies": {}
+}
