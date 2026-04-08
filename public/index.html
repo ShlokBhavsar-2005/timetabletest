@@ -238,10 +238,18 @@
     }
 
     /* Timetable */
+    .table-wrapper {
+      width: 100%;
+      overflow-x: auto;
+      -webkit-overflow-scrolling: touch;
+      border-radius: 6px;
+    }
+
     table {
       width: 100%;
       border-collapse: collapse;
       margin-top: 15px;
+      min-width: 500px;
     }
 
     th, td {
@@ -249,6 +257,7 @@
       padding: 12px;
       text-align: center;
       font-size: 13px;
+      white-space: nowrap;
     }
 
     th {
@@ -262,10 +271,46 @@
 
     .output-actions {
       margin-top: 20px;
-      text-align: right;
       display: flex;
       gap: 10px;
+      flex-wrap: wrap;
       justify-content: flex-end;
+    }
+
+    .export-btn-row {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+      align-items: center;
+    }
+
+    /* ── Mobile Responsive ── */
+    @media (max-width: 640px) {
+      .container { padding: 10px; }
+      .header { padding: 20px 10px; }
+      .header h1 { font-size: 20px; }
+      .section { padding: 15px; }
+      .section-title { font-size: 15px; }
+      .grid { grid-template-columns: 1fr; }
+      .sub-card-grid { grid-template-columns: 1fr; }
+      .stats-grid { grid-template-columns: 1fr; }
+
+      th, td { padding: 8px 6px; font-size: 12px; }
+
+      .output-actions {
+        justify-content: center;
+      }
+
+      .output-actions .btn-secondary,
+      .export-btn-row .btn-secondary {
+        flex: 1 1 auto;
+        min-width: 0;
+        text-align: center;
+        padding: 8px 10px;
+        font-size: 12px;
+      }
+
+      .btn-generate { font-size: 14px; padding: 12px; }
     }
 
     footer {
@@ -557,8 +602,9 @@
       </div>
 
       <div class="output-actions">
-        <button class="btn-secondary" onclick="downloadExcel()">📥 Download Excel</button>
-        <button class="btn-secondary" onclick="downloadAsImage()">🖼️ Download as Image</button>
+        <button class="btn-secondary" onclick="downloadExcel()">📥 Excel</button>
+        <button class="btn-secondary" onclick="downloadAsPdf()">📄 PDF</button>
+        <button class="btn-secondary" onclick="downloadAsImage()">🖼️ Image</button>
         <button class="btn-secondary" onclick="resetForm()">⟲ New Timetable</button>
       </div>
     </div>
@@ -1229,7 +1275,7 @@
     // Timetable functions
     function createPreviewTable(schedule) {
       const container = document.getElementById('previewContainer');
-      let html = '<table><thead><tr><th>Day</th><th>Standard</th><th>Subject</th><th>Faculty</th><th>Classroom</th><th>Time</th></tr></thead><tbody>';
+      let html = '<div class="table-wrapper"><table><thead><tr><th>Day</th><th>Standard</th><th>Subject</th><th>Faculty</th><th>Classroom</th><th>Time</th></tr></thead><tbody>';
 
       Object.entries(schedule).forEach(([day, classes]) => {
         classes.forEach((cls, idx) => {
@@ -1244,7 +1290,7 @@
         });
       });
 
-      html += '</tbody></table>';
+      html += '</tbody></table></div>';
       container.innerHTML = html;
     }
 
@@ -1266,9 +1312,10 @@
         const safeId = standard.replace(/\s+/g, '-').replace(/'/g, "");
         html += `<div style="margin: 20px 0; padding: 15px; background: #22263a; border: 1px solid #2e3250; border-radius: 8px;">
           <h4 style="color: #e2e8f0; margin: 0 0 10px 0;">${standard}</h4>
-          <div style="display: flex; gap: 10px; margin-bottom: 10px; flex-wrap: wrap;">
-            <button class="btn-secondary" onclick="createStandardTable('${standard}', '${standard.replace(/'/g, "\\'")}')" style="width: auto;">📋 Generate Table</button>
+          <div class="export-btn-row" style="margin-bottom: 10px;">
+            <button class="btn-secondary" onclick="createStandardTable('${standard}', '${standard.replace(/'/g, "\\'")}')" style="width: auto;">📋 Generate</button>
             <button class="btn-secondary" onclick="downloadStandardAsExcel('${standard}')" style="width: auto;">📥 Excel</button>
+            <button class="btn-secondary" onclick="downloadStandardAsPdf('${safeId}', '${standard.replace(/'/g, "\\'")}')" style="width: auto;">📄 PDF</button>
             <button class="btn-secondary" onclick="downloadStandardAsImage('${safeId}')" style="width: auto;">🖼️ Image</button>
           </div>
           <div id="table-${safeId}"></div>
@@ -1300,7 +1347,7 @@
 
       const times = Array.from(allTimes).sort();
 
-      let html = '<table style="width: 100%; border-collapse: collapse; margin-top: 10px;"><thead><tr><th style="border: 1px solid #2e3250; padding: 8px; background: #1a1d27; color: #94a3b8;">Time</th>';
+      let html = '<div class="table-wrapper"><table style="width: 100%; border-collapse: collapse; margin-top: 10px;"><thead><tr><th style="border: 1px solid #2e3250; padding: 8px; background: #1a1d27; color: #94a3b8;">Time</th>';
 
       allDays.forEach(day => {
         html += `<th style="border: 1px solid #2e3250; padding: 8px; background: #1a1d27; color: #94a3b8;">${day}</th>`;
@@ -1326,7 +1373,7 @@
         html += '</tr>';
       });
 
-      html += '</tbody></table>';
+      html += '</tbody></table></div>';
       container.innerHTML = html;
     }
 
@@ -1454,8 +1501,9 @@
       card.innerHTML = `
         <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:8px; margin-bottom:10px;">
           <h4 style="color:#e2e8f0; margin:0;">👤 ${esc(facultyName)}</h4>
-          <div style="display:flex; gap:8px; flex-wrap:wrap;">
+          <div class="export-btn-row">
             <button class="btn-secondary" onclick="downloadFacultyAsExcel('${facultyName.replace(/'/g, "\\\'")}')" style="width:auto;">📥 CSV</button>
+            <button class="btn-secondary" onclick="downloadFacultyAsPdf('${safeId}', '${facultyName.replace(/'/g, "\\\'")}')" style="width:auto;">📄 PDF</button>
             <button class="btn-secondary" onclick="downloadFacultyAsImage('${safeId}')" style="width:auto;">🖼️ Image</button>
             <button class="btn-remove" onclick="document.getElementById('${safeId}').remove()" style="margin:0;">✕ Close</button>
           </div>
@@ -1491,7 +1539,7 @@
         return;
       }
 
-      let html = '<table style="width:100%; border-collapse:collapse; margin-top:10px;"><thead><tr>';
+      let html = '<div class="table-wrapper"><table style="width:100%; border-collapse:collapse; margin-top:10px;"><thead><tr>';
       html += '<th style="border:1px solid #2e3250; padding:8px; background:#1a1d27; color:#94a3b8;">Time</th>';
       allDays.forEach(day => {
         html += `<th style="border:1px solid #2e3250; padding:8px; background:#1a1d27; color:#94a3b8;">${day}</th>`;
@@ -1512,7 +1560,7 @@
         html += '</tr>';
       });
 
-      html += '</tbody></table>';
+      html += '</tbody></table></div>';
       container.innerHTML = html;
     }
 
@@ -1755,6 +1803,71 @@
           showAlert('Image downloaded successfully!', 'success');
         });
       };
+    }
+
+    // ── PDF Export Helpers ───────────────────────────────────────────
+    function _loadHtml2Pdf() {
+      return new Promise((resolve, reject) => {
+        if (window.html2pdf) { resolve(); return; }
+        const s = document.createElement('script');
+        s.src = 'https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js';
+        s.onload = resolve;
+        s.onerror = () => reject(new Error('Failed to load html2pdf library'));
+        document.head.appendChild(s);
+      });
+    }
+
+    async function _exportElementAsPdf(element, filename) {
+      try {
+        await _loadHtml2Pdf();
+        // temporarily remove scroll clipping so the full table is captured
+        const wrappers = element.querySelectorAll('.table-wrapper');
+        wrappers.forEach(w => { w.style.overflow = 'visible'; });
+
+        await html2pdf().set({
+          margin:      [8, 6, 8, 6],
+          filename:    filename,
+          image:       { type: 'jpeg', quality: 0.95 },
+          html2canvas: { scale: 2, backgroundColor: '#0f1117', useCORS: true, scrollX: 0, scrollY: 0 },
+          jsPDF:       { unit: 'mm', format: 'a4', orientation: 'landscape' },
+          pagebreak:   { mode: ['avoid-all', 'css', 'legacy'] }
+        }).from(element).save();
+
+        wrappers.forEach(w => { w.style.overflow = ''; });
+        showAlert('PDF downloaded successfully!', 'success');
+      } catch (err) {
+        console.error('PDF export error:', err);
+        showAlert('Error generating PDF: ' + err.message, 'error');
+      }
+    }
+
+    function downloadAsPdf() {
+      const element = document.getElementById('previewContainer');
+      if (!element || !element.innerHTML.trim()) {
+        showAlert('No timetable to download', 'error');
+        return;
+      }
+      _exportElementAsPdf(element, `spacetime_timetable_${Date.now()}.pdf`);
+    }
+
+    function downloadStandardAsPdf(standardId, standardName) {
+      const element = document.getElementById(`table-${standardId}`);
+      if (!element || !element.innerHTML.trim()) {
+        showAlert('Please generate the table first', 'error');
+        return;
+      }
+      const safeName = (standardName || standardId).replace(/[^a-zA-Z0-9_ -]/g, '');
+      _exportElementAsPdf(element, `${safeName}_timetable.pdf`);
+    }
+
+    function downloadFacultyAsPdf(safeId, facultyName) {
+      const element = document.getElementById(`${safeId}-table`);
+      if (!element || !element.innerHTML.trim()) {
+        showAlert('Please view the timetable first', 'error');
+        return;
+      }
+      const safeName = (facultyName || safeId).replace(/[^a-zA-Z0-9_ -]/g, '');
+      _exportElementAsPdf(element, `${safeName}_timetable.pdf`);
     }
 
     function resetForm() {
