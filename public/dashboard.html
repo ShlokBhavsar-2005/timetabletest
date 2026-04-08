@@ -272,6 +272,42 @@
       border: 1px solid rgba(100,116,139,0.2);
     }
 
+    /* ── CARD ACTIONS BAR ── */
+    .card-actions {
+      display: flex;
+      gap: 6px;
+      margin-top: 14px;
+      padding-top: 12px;
+      border-top: 1px solid var(--border);
+    }
+
+    .card-action-btn {
+      flex: 1;
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      color: var(--muted);
+      border-radius: 6px;
+      padding: 6px 4px;
+      font-size: 11px;
+      font-family: var(--sans);
+      font-weight: 500;
+      cursor: pointer;
+      transition: all .18s;
+      white-space: nowrap;
+    }
+
+    .card-action-btn:hover {
+      border-color: var(--accent);
+      color: var(--text);
+      background: rgba(79,110,247,0.08);
+    }
+
+    .card-action-btn.danger:hover {
+      border-color: var(--red);
+      color: var(--red);
+      background: rgba(239,68,68,0.08);
+    }
+
     /* ── DROPDOWN MENU ── */
     .dropdown {
       position: absolute;
@@ -581,15 +617,18 @@ function renderProjects() {
           <button class="project-menu-btn" onclick="event.stopPropagation(); toggleMenu('menu-${p.id}')">⋯</button>
         </div>
         <div class="dropdown" id="menu-${p.id}">
-          <button onclick="event.stopPropagation(); startRename('${p.id}', '${escHtml(p.name)}')">✏️ Rename</button>
           <button onclick="event.stopPropagation(); duplicateProject('${p.id}')">📋 Duplicate</button>
-          <button class="danger" onclick="event.stopPropagation(); deleteProject('${p.id}')">🗑️ Delete</button>
         </div>
       </div>
       <div class="project-name">${escHtml(p.name)}</div>
       <div class="project-meta">
         <span>🕐 ${date}</span>
         <span class="badge ${p.hasOutput ? 'badge-done' : 'badge-draft'}">${p.hasOutput ? 'Generated' : 'Draft'}</span>
+      </div>
+      <div class="card-actions" onclick="event.stopPropagation()">
+        <button class="card-action-btn" onclick="openProject('${p.id}')">📂 Open</button>
+        <button class="card-action-btn" onclick="startRename('${p.id}', '${escHtml(p.name)}')">✏️ Rename</button>
+        <button class="card-action-btn danger" onclick="deleteProject('${p.id}')">🗑️ Delete</button>
       </div>
     </div>`;
   }).join('');
