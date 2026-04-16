@@ -321,7 +321,21 @@ app.post('/api/generate-timetable', requireAuth, async (req, res) => {
       softConstraints: softConstraints || [],
       breakTime: breakTime || null
     });
+
+    // ga.run() blocks until ALL hard constraints are satisfied (conflicts === 0).
+    // It will restart indefinitely — the feasibilityCheck above ensures a solution exists.
     const solution = ga.run();
+
+    // Defensive check: should never be non-zero, but guard just in case
+    if (solution.conflicts > 0) {
+      console.error(`FATAL: GA returned with ${solution.conflicts} conflicts — this should not happen.`);
+      return res.status(500).json({
+        success: false,
+        error: `Internal error: GA could not eliminate all hard constraint conflicts (${solution.conflicts} remaining). Please report this.`
+      });
+    }
+
+    console.log(`✓ Valid timetable generated — 0 conflicts, fitness=${solution.fitness.toFixed(2)}`);
 
     const formattedData = formatSolution(solution, { standards, faculty, assignments, classrooms, daysOfWeek, timeSlots });
 

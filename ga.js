@@ -2,34 +2,33 @@
  * Genetic Algorithm for Timetable Generation
  * Supports hard and soft constraints
  *
- * FIXES applied (see comments tagged [FIX]):
+ * KEY GUARANTEE: The GA will NEVER return a timetable with hard constraint violations.
+ * It runs indefinitely (with restarts and adaptive strategies) until a zero-conflict
+ * solution is found. The server should call this in a worker thread if needed.
+ *
+ * FIXES applied:
  *  F1 – countHardConflicts was called twice per individual per generation (double work).
- *       Now evaluateFitness returns {fitness, conflicts} together; run() uses that.
- *  F2 – crossover always used the fixed midpoint (p1.genes.length/2).
- *       Now uses a random cut-point for diversity.
- *  F3 – room_restriction used Array.indexOf which is case/whitespace sensitive and
- *       silently breaks when the name does not match (returns -1 → constraint skipped).
- *       Now uses a pre-built Map for exact lookup + a warning log.
- *  F4 – evaluateFitness called countHardConflicts internally AND the run() loop called
- *       it again — the inner call is now removed from evaluateFitness; fitness returns
- *       both values from a single pass via evaluateIndividual().
- *  F5 – When the GA is stuck with conflicts, the old code injected 30 % fresh random
- *       individuals but did NOT repair the conflicting genes of elite survivors.
- *       New repairConflicts() method does targeted re-assignment of conflicting genes
- *       before they are placed in the new population, dramatically reducing conflict count.
- *  F6 – mutateWithRate picked only one of {classroom, day, slot} to change per gene.
- *       Under high conflict pressure we now allow multi-field mutation so the gene can
- *       escape a "corner" where all three fields are wrong simultaneously.
- *  F7 – Crossover silently corrupted genes when p1 and p2 had different lengths
- *       (should not happen, but added a guard).
- *  F8 – computeSoftPenalty for no_back_to_back_course: correctly scoped to apply only
- *       to genes that belong to the course referenced by sc.courseId (if non-empty),
- *       or all courses (if empty) — previous implementation was already OK here but
- *       added an explicit comment for clarity.
+ *       Now evaluateIndividual() returns {fitness, conflicts} together.
+ *  F2 – crossover always used the fixed midpoint. Now uses a random cut-point.
+ *  F3 – room_restriction used Array.indexOf (case-sensitive, fragile).
+ *       Now uses a pre-built Map for safe lookup.
+ *  F4 – evaluateFitness called countHardConflicts internally AND run() called
+ *       it again. Inner call removed; single pass via evaluateIndividual().
+ *  F5 – elites were preserved without repairing their conflicting genes.
+ *       repairConflicts() does targeted re-assignment before preservation.
+ *  F6 – mutateWithRate picked only one field per gene.
+ *       Under conflict pressure: multi-field mutation allowed.
+ *  F7 – crossover silently corrupted genes on length mismatch. Guard added.
+ *  F8 – [CORE FIX] GA returned after TIME_LIMIT_MS even with conflicts > 0.
+ *       Now it NEVER returns until conflicts === 0. Infinite restart loop.
+ *  F9 – [NEW] Constraint-aware slot/room assignment in init, repair, and mutation.
+ *       Respects faculty_unavailability, faculty_first/second_half_only, room_restriction
+ *       directly during gene creation — dramatically reduces starting conflict count.
+ *  F10 – [NEW] First individual per restart is built greedily (no-clash slot assignment)
+ *        to give the GA a strong starting point.
  */
 
 class GeneticAlgorithm {
-  // Fast shallow-clone a single gene object (avoids JSON.parse/stringify overhead)
   static _cloneGene(g) {
     return {
       assignmentId: g.assignmentId,
@@ -42,19 +41,17 @@ class GeneticAlgorithm {
     };
   }
 
-  // Fast clone of a full individual
   static _cloneInd(ind) {
     return { genes: ind.genes.map(GeneticAlgorithm._cloneGene), fitness: 0, conflicts: 0 };
   }
 
   constructor(constraints) {
     this.constraints = constraints;
-    this.populationSize = 80;   // was 100 — smaller pop, faster per-generation
-    this.generations    = 200;  // was 300
+    this.populationSize = 100;
     this.mutationRate   = 0.15;
     this.crossoverRate  = 0.85;
-    this.eliteSize      = 5;    // was 8
-    this.tournamentSize = 4;    // was 5
+    this.eliteSize      = 8;
+    this.tournamentSize = 4;
 
     this.standards   = constraints.standards;
     this.faculty     = constraints.faculty;
@@ -63,19 +60,15 @@ class GeneticAlgorithm {
     this.daysOfWeek  = constraints.daysOfWeek;
     this.timeSlots   = constraints.timeSlots;
 
-    // Parsed constraint lists
     this.hardConstraints = constraints.hardConstraints || [];
     this.softConstraints = constraints.softConstraints || [];
+    this.breakTime       = constraints.breakTime || null;
 
-    // Break time: slot.startTime < breakStart → first half
-    this.breakTime = constraints.breakTime || null;
-
-    // Pre-compute which slot indices are "first half" (before break)
     this.firstHalfSlotIndices = this._computeFirstHalfSlots();
 
-    // Course + Standard lookup caches  (O(1) lookup during fitness evaluation)
-    this._courseCache    = {};
-    this._standardCache  = {};
+    // O(1) course/standard lookups
+    this._courseCache   = {};
+    this._standardCache = {};
     this.standards.forEach(std => {
       (std.courses || []).forEach(c => {
         this._courseCache[c.id]   = c;
@@ -83,10 +76,72 @@ class GeneticAlgorithm {
       });
     });
 
-    // [FIX F3] Pre-build classroom name → index map for case-insensitive lookup
+    // [FIX F3] Classroom name -> index map (case-insensitive)
     this._classroomIndexMap = new Map();
     this.classrooms.forEach((name, idx) => {
       this._classroomIndexMap.set((name || '').trim().toLowerCase(), idx);
+    });
+
+    // [FIX F9] Pre-compute constraint lookup structures
+    this._buildConstraintIndex();
+  }
+
+  // ─────────────────────────────────────────────
+  // PRE-COMPUTE CONSTRAINT INDEX
+  // ─────────────────────────────────────────────
+
+  _buildConstraintIndex() {
+    this._facultyHalfRestriction = new Map(); // facultyId -> 'first' | 'second'
+    this._blockedFacultySlots    = new Map(); // facultyId -> Set<"di-si">
+    this._courseRoomRestriction  = new Map(); // courseId  -> roomIdx
+
+    this.hardConstraints.forEach(hc => {
+      switch (hc.type) {
+        case 'faculty_unavailability': {
+          const dayIdx = this.daysOfWeek.indexOf(hc.day);
+          if (dayIdx === -1) break;
+          if (!this._blockedFacultySlots.has(hc.facultyId))
+            this._blockedFacultySlots.set(hc.facultyId, new Set());
+          const blocked = this._blockedFacultySlots.get(hc.facultyId);
+          if (hc.timeslot) {
+            const si = this.timeSlots.findIndex(s => s.startTime === hc.timeslot);
+            if (si !== -1) blocked.add(`${dayIdx}-${si}`);
+          } else {
+            this.timeSlots.forEach((_, si) => blocked.add(`${dayIdx}-${si}`));
+          }
+          break;
+        }
+        case 'faculty_first_half_only':
+          this._facultyHalfRestriction.set(hc.facultyId, 'first');
+          break;
+        case 'faculty_second_half_only':
+          this._facultyHalfRestriction.set(hc.facultyId, 'second');
+          break;
+        case 'room_restriction': {
+          const ri = this._classroomIndexMap.get((hc.classroom || '').trim().toLowerCase());
+          if (ri !== undefined) this._courseRoomRestriction.set(hc.courseId, ri);
+          break;
+        }
+      }
+    });
+
+    // Pre-compute valid {dayIdx, timeSlotIdx} pairs per faculty
+    this._validSlotsForFaculty = new Map();
+    const allFacIds = [...new Set(this.assignments.map(a => a.facultyId))];
+    allFacIds.forEach(fid => {
+      const half    = this._facultyHalfRestriction.get(fid) || null;
+      const blocked = this._blockedFacultySlots.get(fid) || new Set();
+      const valid   = [];
+      this.daysOfWeek.forEach((_, di) => {
+        this.timeSlots.forEach((_, si) => {
+          if (blocked.has(`${di}-${si}`)) return;
+          const inFirst = this.firstHalfSlotIndices.has(si);
+          if (half === 'first'  && !inFirst) return;
+          if (half === 'second' && inFirst)  return;
+          valid.push({ dayIdx: di, timeSlotIdx: si });
+        });
+      });
+      this._validSlotsForFaculty.set(fid, valid);
     });
   }
 
@@ -95,11 +150,9 @@ class GeneticAlgorithm {
   // ─────────────────────────────────────────────
 
   _computeFirstHalfSlots() {
-    if (!this.breakTime || !this.breakTime.start) {
-      // No break defined → all slots are "first half"
+    if (!this.breakTime || !this.breakTime.start)
       return new Set(this.timeSlots.map((_, i) => i));
-    }
-    const breakStart = this.breakTime.start; // e.g. "13:00"
+    const breakStart = this.breakTime.start;
     const indices = new Set();
     this.timeSlots.forEach((slot, i) => {
       if (slot.startTime < breakStart) indices.add(i);
@@ -107,92 +160,113 @@ class GeneticAlgorithm {
     return indices;
   }
 
-  findStandardByCourseId(courseId) {
-    return this._standardCache[courseId] || null;
-  }
-
-  findCourseByCourseId(courseId) {
-    return this._courseCache[courseId] || null;
-  }
+  findStandardByCourseId(courseId) { return this._standardCache[courseId] || null; }
+  findCourseByCourseId(courseId)   { return this._courseCache[courseId]   || null; }
 
   // ─────────────────────────────────────────────
-  // MAIN RUN
+  // MAIN RUN — [FIX F8] NEVER returns with conflicts > 0
   // ─────────────────────────────────────────────
 
   run() {
-    console.log('Starting GA with population:', this.populationSize);
+    console.log('Starting GA — will run until ALL hard constraints are satisfied.');
+    console.log(`Population: ${this.populationSize}, Assignments: ${this.assignments.length}`);
 
-    const MAX_RESTARTS     = 2;   // was 5  — fewer restarts
-    const MAX_GENERATIONS  = 200; // was 500 — hard cap per attempt
-    const STAGNATION_LIMIT = 50;  // was 80
-    const TIME_LIMIT_MS    = 25_000; // 25-second wall-clock hard stop
-    const startTime        = Date.now();
+    const GENS_PER_ATTEMPT = 500;
+    const STAGNATION_LIMIT = 80;
 
-    let globalBest        = null;
-    let globalBestFitness = -Infinity;
+    let globalBest          = null;
+    let globalBestConflicts = Infinity;
+    let attempt             = 0;
+    let totalGenerations    = 0;
 
-    for (let attempt = 0; attempt <= MAX_RESTARTS; attempt++) {
-      if (attempt > 0)
-        console.log(`↻ Restart ${attempt} — still have conflicts, trying fresh population`);
+    // Infinite loop — only exits when conflicts === 0
+    while (true) {
+      attempt++;
+      if (attempt > 1) {
+        console.log(`↻ Restart ${attempt} — best: ${globalBestConflicts} conflict(s) remaining...`);
+      }
 
       let population         = this.initializePopulation();
       let bestSolution       = null;
       let bestFitness        = -Infinity;
       let noImprovementCount = 0;
 
-      for (let generation = 0; generation < MAX_GENERATIONS; generation++) {
-        // [FIX F1 / F4] Single-pass evaluation: fitness + conflicts computed once per individual.
+      for (let generation = 0; generation < GENS_PER_ATTEMPT; generation++) {
+        totalGenerations++;
+
+        // Single-pass evaluation
         population.forEach(ind => {
-          const result  = this.evaluateIndividual(ind);
-          ind.fitness   = result.fitness;
-          ind.conflicts = result.conflicts;
+          const r   = this.evaluateIndividual(ind);
+          ind.fitness   = r.fitness;
+          ind.conflicts = r.conflicts;
         });
 
         population.sort((a, b) => b.fitness - a.fitness);
 
         if (population[0].fitness > bestFitness) {
-          bestFitness        = population[0].fitness;
-          bestSolution       = GeneticAlgorithm._cloneInd(population[0]);
+          bestFitness  = population[0].fitness;
+          bestSolution = GeneticAlgorithm._cloneInd(population[0]);
           bestSolution.fitness   = population[0].fitness;
           bestSolution.conflicts = population[0].conflicts;
           noImprovementCount = 0;
-          if (generation % 50 === 0)
-            console.log(`Attempt ${attempt} Gen ${generation}: Fitness=${bestFitness.toFixed(2)}, Conflicts=${bestSolution.conflicts}`);
+
+          if (bestSolution.conflicts < globalBestConflicts) {
+            globalBestConflicts = bestSolution.conflicts;
+            globalBest          = GeneticAlgorithm._cloneInd(bestSolution);
+          }
+
+          if (generation % 50 === 0 || bestSolution.conflicts === 0) {
+            console.log(
+              `Attempt ${attempt} Gen ${generation} (total ${totalGenerations}): ` +
+              `Fitness=${bestFitness.toFixed(2)}, Conflicts=${bestSolution.conflicts}`
+            );
+          }
         } else {
           noImprovementCount++;
         }
 
-        // Stop early only if ZERO conflicts and stable
-        if (bestSolution.conflicts === 0 && noImprovementCount > 30) {
-          console.log(`✓ Zero-conflict solution found at attempt ${attempt}, gen ${generation}`);
+        // ── SUCCESS: only exit when zero conflicts ──
+        if (bestSolution.conflicts === 0) {
+          console.log(
+            `✓ Zero-conflict solution found! Attempt ${attempt}, Gen ${generation} ` +
+            `(total generations: ${totalGenerations})`
+          );
+          bestSolution.softReport = this.evaluateSoftConstraints(bestSolution);
+          return bestSolution;
+        }
+
+        // Stagnation → break inner loop and restart
+        if (noImprovementCount > STAGNATION_LIMIT) {
+          console.log(
+            `  Stagnated at ${bestSolution.conflicts} conflict(s) after gen ${generation}. Restarting...`
+          );
           break;
         }
 
-        // Hard wall-clock exit — prevent browser/server timeout
-        if (Date.now() - startTime > TIME_LIMIT_MS) {
-          console.warn(`⏱ Time limit reached at attempt ${attempt}, gen ${generation} — returning best so far`);
-          break;
-        }
-
-        const stuckWithConflicts = bestSolution.conflicts > 0 && noImprovementCount > STAGNATION_LIMIT;
+        // ── Build next generation ──
+        const stuckWithConflicts = bestSolution.conflicts > 0 && noImprovementCount > 40;
         const effectiveMutation  = stuckWithConflicts
-          ? Math.min(this.mutationRate * 3, 0.5)
+          ? Math.min(this.mutationRate * 4, 0.6)
           : this.mutationRate;
 
         const newPop = [];
 
-        // Always keep elites.  [FIX F5] Repair their conflicting genes before preservation.
+        // Keep elites (repaired)
         for (let i = 0; i < this.eliteSize && i < population.length; i++) {
           const elite = GeneticAlgorithm._cloneInd(population[i]);
           if (elite.conflicts > 0) this.repairConflicts(elite);
           newPop.push(elite);
         }
 
-        // Inject fresh individuals when deeply stuck
+        // Inject fresh seeds when deeply stuck
         if (stuckWithConflicts) {
-          const freshCount = Math.floor(this.populationSize * 0.3);
-          const fresh      = this.initializePopulation();
-          for (let i = 0; i < freshCount; i++) newPop.push(fresh[i]);
+          const greedy = this._createGreedyIndividual();
+          if (greedy) newPop.push(greedy);
+
+          const freshCount = Math.floor(this.populationSize * 0.4);
+          for (let i = 0; i < freshCount && newPop.length < this.populationSize; i++) {
+            newPop.push(this._createSmartRandomIndividual());
+          }
         }
 
         while (newPop.length < this.populationSize) {
@@ -201,33 +275,15 @@ class GeneticAlgorithm {
           let child = Math.random() < this.crossoverRate
             ? this.crossover(p1, p2)
             : GeneticAlgorithm._cloneInd(p1);
-
           child = this.mutateWithRate(child, effectiveMutation, stuckWithConflicts);
           newPop.push(child);
         }
 
         population = newPop;
       }
-
-      if (bestSolution && bestSolution.fitness > globalBestFitness) {
-        globalBestFitness = bestSolution.fitness;
-        globalBest        = bestSolution;
-      }
-
-      if (globalBest && globalBest.conflicts === 0) break;
-      if (Date.now() - startTime > TIME_LIMIT_MS) break; // time limit hit inside inner loop
+      // End of inner generation loop — restart
     }
-
-    console.log(`GA Complete — Fitness: ${globalBestFitness.toFixed(2)}, Conflicts: ${globalBest.conflicts}`);
-    if (globalBest.conflicts > 0) {
-      console.warn(
-        `⚠️ Could not eliminate all conflicts after ${MAX_RESTARTS + 1} attempts. ` +
-        `Best result: ${globalBest.conflicts} conflict(s).`
-      );
-    }
-
-    globalBest.softReport = this.evaluateSoftConstraints(globalBest);
-    return globalBest;
+    // Unreachable, but satisfies linter
   }
 
   // ─────────────────────────────────────────────
@@ -236,24 +292,129 @@ class GeneticAlgorithm {
 
   initializePopulation() {
     const population = [];
-    for (let i = 0; i < this.populationSize; i++) {
-      population.push(this._createRandomIndividual());
+    // First individual: greedy (best possible start)
+    const greedy = this._createGreedyIndividual();
+    population.push(greedy || this._createSmartRandomIndividual());
+    // Rest: smart-random (constraint-aware slot selection)
+    while (population.length < this.populationSize) {
+      population.push(this._createSmartRandomIndividual());
     }
     return population;
   }
 
-  _createRandomIndividual() {
+  // [FIX F10] Greedy individual: assigns each gene to a valid slot with no clashes
+  _createGreedyIndividual() {
+    try {
+      const individual = { genes: [], fitness: 0, conflicts: 0 };
+      const usedFacSlot  = new Set(); // "facultyId-di-si"
+      const usedRoomSlot = new Set(); // "roomIdx-di-si"
+      const usedStdSlot  = new Set(); // "stdId-di-si"
+
+      this.assignments.forEach(assignment => {
+        const timesPerWeek = parseInt(assignment.timesPerWeek);
+        const validSlots   = this._validSlotsForFaculty.get(assignment.facultyId) || [];
+        const requiredRoom = this._courseRoomRestriction.get(assignment.courseId);
+        const std          = this.findStandardByCourseId(assignment.courseId);
+
+        for (let instance = 0; instance < timesPerWeek; instance++) {
+          // Shuffle to avoid always placing in same order
+          const shuffled = [...validSlots].sort(() => Math.random() - 0.5);
+          let placed = false;
+
+          for (const { dayIdx, timeSlotIdx } of shuffled) {
+            const facKey = `${assignment.facultyId}-${dayIdx}-${timeSlotIdx}`;
+            const stdKey = std ? `${std.id}-${dayIdx}-${timeSlotIdx}` : null;
+            if (usedFacSlot.has(facKey)) continue;
+            if (stdKey && usedStdSlot.has(stdKey)) continue;
+
+            // Find an available classroom
+            let classroomIdx = null;
+            if (requiredRoom !== undefined) {
+              if (!usedRoomSlot.has(`${requiredRoom}-${dayIdx}-${timeSlotIdx}`))
+                classroomIdx = requiredRoom;
+            } else {
+              for (let ri = 0; ri < this.classrooms.length; ri++) {
+                if (!usedRoomSlot.has(`${ri}-${dayIdx}-${timeSlotIdx}`)) {
+                  classroomIdx = ri; break;
+                }
+              }
+            }
+            if (classroomIdx === null) continue;
+
+            usedFacSlot.add(facKey);
+            usedRoomSlot.add(`${classroomIdx}-${dayIdx}-${timeSlotIdx}`);
+            if (stdKey) usedStdSlot.add(stdKey);
+
+            individual.genes.push({
+              assignmentId: assignment.id,
+              courseId:     assignment.courseId,
+              facultyId:    assignment.facultyId,
+              classroomIdx,
+              dayIdx,
+              timeSlotIdx,
+              instance
+            });
+            placed = true;
+            break;
+          }
+
+          if (!placed) {
+            // Fallback: constraint-aware but may clash
+            const fallback = validSlots.length > 0
+              ? validSlots[Math.floor(Math.random() * validSlots.length)]
+              : { dayIdx: Math.floor(Math.random() * this.daysOfWeek.length),
+                  timeSlotIdx: Math.floor(Math.random() * this.timeSlots.length) };
+            const roomIdx = requiredRoom !== undefined
+              ? requiredRoom
+              : Math.floor(Math.random() * this.classrooms.length);
+            individual.genes.push({
+              assignmentId: assignment.id,
+              courseId:     assignment.courseId,
+              facultyId:    assignment.facultyId,
+              classroomIdx: roomIdx,
+              dayIdx:       fallback.dayIdx,
+              timeSlotIdx:  fallback.timeSlotIdx,
+              instance
+            });
+          }
+        }
+      });
+      return individual;
+    } catch (e) {
+      console.warn('Greedy init failed, falling back to smart-random:', e.message);
+      return null;
+    }
+  }
+
+  // [FIX F9] Smart random: picks day+slot from faculty's valid set, respects room_restriction
+  _createSmartRandomIndividual() {
     const individual = { genes: [], fitness: 0, conflicts: 0 };
     this.assignments.forEach(assignment => {
       const timesPerWeek = parseInt(assignment.timesPerWeek);
+      const validSlots   = this._validSlotsForFaculty.get(assignment.facultyId) || [];
+      const requiredRoom = this._courseRoomRestriction.get(assignment.courseId);
+
       for (let instance = 0; instance < timesPerWeek; instance++) {
+        let dayIdx, timeSlotIdx;
+        if (validSlots.length > 0) {
+          const pick = validSlots[Math.floor(Math.random() * validSlots.length)];
+          dayIdx      = pick.dayIdx;
+          timeSlotIdx = pick.timeSlotIdx;
+        } else {
+          dayIdx      = Math.floor(Math.random() * this.daysOfWeek.length);
+          timeSlotIdx = Math.floor(Math.random() * this.timeSlots.length);
+        }
+        const classroomIdx = requiredRoom !== undefined
+          ? requiredRoom
+          : Math.floor(Math.random() * this.classrooms.length);
+
         individual.genes.push({
           assignmentId: assignment.id,
           courseId:     assignment.courseId,
           facultyId:    assignment.facultyId,
-          classroomIdx: Math.floor(Math.random() * this.classrooms.length),
-          dayIdx:       Math.floor(Math.random() * this.daysOfWeek.length),
-          timeSlotIdx:  Math.floor(Math.random() * this.timeSlots.length),
+          classroomIdx,
+          dayIdx,
+          timeSlotIdx,
           instance
         });
       }
@@ -261,36 +422,44 @@ class GeneticAlgorithm {
     return individual;
   }
 
+  _createRandomIndividual() {
+    return this._createSmartRandomIndividual();
+  }
+
   // ─────────────────────────────────────────────
-  // [FIX F5] CONFLICT REPAIR
-  // Finds genes that are currently involved in a hard conflict and randomly
-  // re-assigns their (day, slot, classroom) until the local conflict is gone
-  // or a max-retry limit is reached.  This is not a guarantee — it is a
-  // best-effort repair that dramatically reduces conflict count in elites.
+  // [FIX F5 + F9] CONFLICT REPAIR — constraint-aware re-assignment
   // ─────────────────────────────────────────────
 
   repairConflicts(individual) {
-    const MAX_REPAIR_ATTEMPTS = 20; // was 50 — fewer is faster, still effective
+    const MAX_REPAIR_PASSES = 80;
 
-    for (let attempt = 0; attempt < MAX_REPAIR_ATTEMPTS; attempt++) {
-      // Identify all conflicting gene indices
+    for (let pass = 0; pass < MAX_REPAIR_PASSES; pass++) {
       const conflictSet = this._findConflictingGeneIndices(individual);
-      if (conflictSet.size === 0) break; // fully repaired
+      if (conflictSet.size === 0) break;
 
-      // Pick one conflicting gene at random and re-assign it
-      const indices = Array.from(conflictSet);
+      const indices  = Array.from(conflictSet);
       const idxToFix = indices[Math.floor(Math.random() * indices.length)];
-      const gene = individual.genes[idxToFix];
-      gene.classroomIdx = Math.floor(Math.random() * this.classrooms.length);
-      gene.dayIdx       = Math.floor(Math.random() * this.daysOfWeek.length);
-      gene.timeSlotIdx  = Math.floor(Math.random() * this.timeSlots.length);
+      const gene     = individual.genes[idxToFix];
+
+      // Pick a valid (day, slot) for this faculty
+      const validSlots = this._validSlotsForFaculty.get(gene.facultyId) || [];
+      if (validSlots.length > 0) {
+        const pick       = validSlots[Math.floor(Math.random() * validSlots.length)];
+        gene.dayIdx      = pick.dayIdx;
+        gene.timeSlotIdx = pick.timeSlotIdx;
+      } else {
+        gene.dayIdx      = Math.floor(Math.random() * this.daysOfWeek.length);
+        gene.timeSlotIdx = Math.floor(Math.random() * this.timeSlots.length);
+      }
+
+      // Honour room_restriction
+      const requiredRoom = this._courseRoomRestriction.get(gene.courseId);
+      gene.classroomIdx  = requiredRoom !== undefined
+        ? requiredRoom
+        : Math.floor(Math.random() * this.classrooms.length);
     }
   }
 
-  /**
-   * Returns a Set of gene indices that are part of at least one hard conflict.
-   * Covers: faculty clash, classroom clash, standard clash, hard-constraint violations.
-   */
   _findConflictingGeneIndices(individual) {
     const conflicting = new Set();
 
@@ -301,8 +470,8 @@ class GeneticAlgorithm {
       if (!facMap[key]) facMap[key] = [];
       facMap[key].push(i);
     });
-    Object.values(facMap).forEach(idxList => {
-      if (idxList.length > 1) idxList.forEach(i => conflicting.add(i));
+    Object.values(facMap).forEach(list => {
+      if (list.length > 1) list.forEach(i => conflicting.add(i));
     });
 
     // Classroom clashes
@@ -312,8 +481,8 @@ class GeneticAlgorithm {
       if (!roomMap[key]) roomMap[key] = [];
       roomMap[key].push(i);
     });
-    Object.values(roomMap).forEach(idxList => {
-      if (idxList.length > 1) idxList.forEach(i => conflicting.add(i));
+    Object.values(roomMap).forEach(list => {
+      if (list.length > 1) list.forEach(i => conflicting.add(i));
     });
 
     // Standard clashes
@@ -325,11 +494,11 @@ class GeneticAlgorithm {
       if (!stdMap[key]) stdMap[key] = [];
       stdMap[key].push(i);
     });
-    Object.values(stdMap).forEach(idxList => {
-      if (idxList.length > 1) idxList.forEach(i => conflicting.add(i));
+    Object.values(stdMap).forEach(list => {
+      if (list.length > 1) list.forEach(i => conflicting.add(i));
     });
 
-    // Hard constraint violations — mark the offending gene
+    // Custom hard constraint violations
     this.hardConstraints.forEach(hc => {
       switch (hc.type) {
 
@@ -339,20 +508,17 @@ class GeneticAlgorithm {
             ? this.timeSlots.findIndex(s => s.startTime === hc.timeslot)
             : -1;
           individual.genes.forEach((g, i) => {
-            if (g.facultyId !== hc.facultyId) return;
-            if (g.dayIdx !== dayIdx) return;
-            // slotIdx === -1 means "whole day blocked"
+            if (g.facultyId !== hc.facultyId || g.dayIdx !== dayIdx) return;
             if (slotIdx === -1 || g.timeSlotIdx === slotIdx) conflicting.add(i);
           });
           break;
         }
 
         case 'room_restriction': {
-          // [FIX F3] Use pre-built Map for safe lookup
-          const roomIdx = this._classroomIndexMap.get((hc.classroom || '').trim().toLowerCase());
-          if (roomIdx === undefined) break; // unknown room — skip (warning logged elsewhere)
+          const ri = this._classroomIndexMap.get((hc.classroom || '').trim().toLowerCase());
+          if (ri === undefined) break;
           individual.genes.forEach((g, i) => {
-            if (g.courseId === hc.courseId && g.classroomIdx !== roomIdx) conflicting.add(i);
+            if (g.courseId === hc.courseId && g.classroomIdx !== ri) conflicting.add(i);
           });
           break;
         }
@@ -379,26 +545,18 @@ class GeneticAlgorithm {
   }
 
   // ─────────────────────────────────────────────
-  // FITNESS  — [FIX F1 / F4]
-  // evaluateIndividual() does ONE pass for both fitness and conflict count.
-  // evaluateFitness() is kept as a convenience wrapper (used internally only).
+  // FITNESS
   // ─────────────────────────────────────────────
 
   evaluateIndividual(individual) {
     const conflicts   = this.countHardConflicts(individual);
     const softPenalty = this.computeSoftPenalty(individual);
     const distScore   = this.evaluateDistribution(individual);
-
-    const maxPossibleScore = individual.genes.length * 200;
-    const hardPenalty      = conflicts * (maxPossibleScore + 10000);
-
-    return {
-      conflicts,
-      fitness: distScore - softPenalty - hardPenalty
-    };
+    const maxScore    = individual.genes.length * 200;
+    const hardPenalty = conflicts * (maxScore + 10000);
+    return { conflicts, fitness: distScore - softPenalty - hardPenalty };
   }
 
-  // Kept for backward compat / external callers
   evaluateFitness(individual) {
     return this.evaluateIndividual(individual).fitness;
   }
@@ -408,12 +566,12 @@ class GeneticAlgorithm {
   // ─────────────────────────────────────────────
 
   countHardConflicts(individual) {
-    let conflicts = 0;
-    conflicts += this.checkFacultyConflicts(individual);
-    conflicts += this.checkClassroomConflicts(individual);
-    conflicts += this.checkStandardConflicts(individual);
-    conflicts += this.checkHardConstraintViolations(individual);
-    return conflicts;
+    return (
+      this.checkFacultyConflicts(individual) +
+      this.checkClassroomConflicts(individual) +
+      this.checkStandardConflicts(individual) +
+      this.checkHardConstraintViolations(individual)
+    );
   }
 
   checkFacultyConflicts(individual) {
@@ -438,7 +596,6 @@ class GeneticAlgorithm {
     const map = {};
     individual.genes.forEach(g => {
       const std = this.findStandardByCourseId(g.courseId);
-      // If courseId is unknown, skip — validation should have caught it before GA runs
       if (!std) return;
       const key = `${std.id}-${g.dayIdx}-${g.timeSlotIdx}`;
       map[key] = (map[key] || 0) + 1;
@@ -452,36 +609,30 @@ class GeneticAlgorithm {
     this.hardConstraints.forEach(hc => {
       switch (hc.type) {
 
-        // H1: Faculty unavailability — faculty cannot be scheduled on a given day (and optional slot)
         case 'faculty_unavailability': {
           const dayIdx  = this.daysOfWeek.indexOf(hc.day);
           const slotIdx = hc.timeslot
             ? this.timeSlots.findIndex(s => s.startTime === hc.timeslot)
             : -1;
           individual.genes.forEach(g => {
-            if (g.facultyId !== hc.facultyId) return;
-            if (g.dayIdx !== dayIdx) return;
-            // slotIdx === -1 → whole day blocked
+            if (g.facultyId !== hc.facultyId || g.dayIdx !== dayIdx) return;
             if (slotIdx === -1 || g.timeSlotIdx === slotIdx) violations++;
           });
           break;
         }
 
-        // H6: Room restriction — course must use a specific classroom
         case 'room_restriction': {
-          // [FIX F3] Use pre-built Map; log a warning if the room name is unknown
-          const roomIdx = this._classroomIndexMap.get((hc.classroom || '').trim().toLowerCase());
-          if (roomIdx === undefined) {
-            console.warn(`[room_restriction] Classroom "${hc.classroom}" not found in classrooms list — constraint ignored.`);
+          const ri = this._classroomIndexMap.get((hc.classroom || '').trim().toLowerCase());
+          if (ri === undefined) {
+            console.warn(`[room_restriction] Classroom "${hc.classroom}" not found — constraint ignored.`);
             break;
           }
           individual.genes.forEach(g => {
-            if (g.courseId === hc.courseId && g.classroomIdx !== roomIdx) violations++;
+            if (g.courseId === hc.courseId && g.classroomIdx !== ri) violations++;
           });
           break;
         }
 
-        // H_BREAK: Faculty only available in first half — never schedule after break
         case 'faculty_first_half_only': {
           individual.genes.forEach(g => {
             if (g.facultyId === hc.facultyId && !this.firstHalfSlotIndices.has(g.timeSlotIdx))
@@ -490,7 +641,6 @@ class GeneticAlgorithm {
           break;
         }
 
-        // H_BREAK2: Faculty only available in second half — never schedule before break
         case 'faculty_second_half_only': {
           individual.genes.forEach(g => {
             if (g.facultyId === hc.facultyId && this.firstHalfSlotIndices.has(g.timeSlotIdx))
@@ -505,7 +655,7 @@ class GeneticAlgorithm {
   }
 
   // ─────────────────────────────────────────────
-  // SOFT CONSTRAINTS — penalty during GA
+  // SOFT CONSTRAINTS
   // ─────────────────────────────────────────────
 
   computeSoftPenalty(individual) {
@@ -515,31 +665,24 @@ class GeneticAlgorithm {
       const weight = sc.weight || 50;
       switch (sc.type) {
 
-        // S1: Faculty prefers first half — penalise slots NOT in first half
-        case 'faculty_prefers_first_half': {
+        case 'faculty_prefers_first_half':
           individual.genes.forEach(g => {
             if (g.facultyId === sc.facultyId && !this.firstHalfSlotIndices.has(g.timeSlotIdx))
               penalty += weight;
           });
           break;
-        }
 
-        // S1b: Faculty prefers second half — penalise slots IN first half
-        case 'faculty_prefers_second_half': {
+        case 'faculty_prefers_second_half':
           individual.genes.forEach(g => {
             if (g.facultyId === sc.facultyId && this.firstHalfSlotIndices.has(g.timeSlotIdx))
               penalty += weight;
           });
           break;
-        }
 
-        // S2: No same std+course back-to-back (consecutive timeslots same day)
-        // When sc.courseId is empty → applies to ALL courses (global rule).
-        // When sc.courseId is non-empty → applies only to that specific course.
         case 'no_back_to_back_course': {
           const groups = {};
           individual.genes.forEach(g => {
-            if (sc.courseId && g.courseId !== sc.courseId) return; // filter if scoped
+            if (sc.courseId && g.courseId !== sc.courseId) return;
             const std = this.findStandardByCourseId(g.courseId);
             if (!std) return;
             const key = `${std.id}-${g.courseId}-${g.dayIdx}`;
@@ -556,7 +699,6 @@ class GeneticAlgorithm {
           break;
         }
 
-        // S3: Balanced daily load — penalise if a faculty has more than avgLoad+1 classes on any day
         case 'balanced_daily_load': {
           const loadMap = {};
           individual.genes.forEach(g => {
@@ -569,21 +711,18 @@ class GeneticAlgorithm {
             const total      = dayLoads.reduce((s, v) => s + v, 0);
             const activeDays = dayLoads.filter(v => v > 0).length || 1;
             const avg        = total / activeDays;
-            dayLoads.forEach(load => {
-              if (load > avg + 1) penalty += weight;
-            });
+            dayLoads.forEach(load => { if (load > avg + 1) penalty += weight; });
           });
           break;
         }
 
-        // S4: Course preferred timeslot (morning = first half, afternoon = second half, last = last slot)
         case 'course_preferred_slot': {
           const lastSlotIdx = this.timeSlots.length - 1;
           individual.genes.forEach(g => {
             if (g.courseId !== sc.courseId) return;
-            const inFirstHalf = this.firstHalfSlotIndices.has(g.timeSlotIdx);
-            if (sc.preference === 'morning'   && !inFirstHalf)               penalty += weight;
-            if (sc.preference === 'afternoon' && inFirstHalf)                 penalty += weight;
+            const inFirst = this.firstHalfSlotIndices.has(g.timeSlotIdx);
+            if (sc.preference === 'morning'   && !inFirst)                  penalty += weight;
+            if (sc.preference === 'afternoon' && inFirst)                    penalty += weight;
             if (sc.preference === 'last'      && g.timeSlotIdx !== lastSlotIdx) penalty += weight;
           });
           break;
@@ -594,17 +733,11 @@ class GeneticAlgorithm {
     return penalty;
   }
 
-  // ─────────────────────────────────────────────
-  // SOFT CONSTRAINT REPORT (post-generation)
-  // ─────────────────────────────────────────────
-
   evaluateSoftConstraints(individual) {
     const report = [];
 
     this.softConstraints.forEach(sc => {
-      let violations = 0;
-      let total      = 0;
-      let detail     = '';
+      let violations = 0, total = 0, detail = '';
 
       switch (sc.type) {
 
@@ -667,9 +800,7 @@ class GeneticAlgorithm {
             const avg        = dayLoads.reduce((s, v) => s + v, 0) / activeDays;
             dayLoads.forEach(load => { total++; if (load > avg + 1) violations++; });
           });
-          detail = violations === 0
-            ? 'Faculty load is well balanced'
-            : `${violations} day(s) with unbalanced load`;
+          detail = violations === 0 ? 'Faculty load is well balanced' : `${violations} day(s) with unbalanced load`;
           break;
         }
 
@@ -679,10 +810,10 @@ class GeneticAlgorithm {
           individual.genes.forEach(g => {
             if (g.courseId !== sc.courseId) return;
             total++;
-            const inFirstHalf = this.firstHalfSlotIndices.has(g.timeSlotIdx);
+            const inFirst = this.firstHalfSlotIndices.has(g.timeSlotIdx);
             let ok = true;
-            if (sc.preference === 'morning'   && !inFirstHalf)               ok = false;
-            if (sc.preference === 'afternoon' && inFirstHalf)                 ok = false;
+            if (sc.preference === 'morning'   && !inFirst)                  ok = false;
+            if (sc.preference === 'afternoon' && inFirst)                    ok = false;
             if (sc.preference === 'last'      && g.timeSlotIdx !== lastSlotIdx) ok = false;
             if (!ok) violations++;
           });
@@ -717,17 +848,14 @@ class GeneticAlgorithm {
       if (!groups[g.assignmentId]) groups[g.assignmentId] = [];
       groups[g.assignmentId].push(g);
     });
-
     Object.values(groups).forEach(genes => {
       const uniqueDays = new Set(genes.map(g => g.dayIdx));
       score += uniqueDays.size * 15;
       const sorted = Array.from(uniqueDays).sort((a, b) => a - b);
       if (sorted.length > 1) score += (sorted[sorted.length - 1] - sorted[0]) * 5;
     });
-
     const uniqueRooms = new Set(individual.genes.map(g => g.classroomIdx));
     if (uniqueRooms.size >= Math.min(3, this.classrooms.length)) score += 20;
-
     return score;
   }
 
@@ -744,21 +872,13 @@ class GeneticAlgorithm {
     return best;
   }
 
-  // [FIX F2] Use a RANDOM cut-point instead of always the midpoint.
-  // [FIX F7] Guard against mismatched gene lengths.
   crossover(p1, p2) {
-    const len   = p1.genes.length;
-    const len2  = p2.genes.length;
-
-    // If lengths differ (should not happen), fall back to a copy of p1
-    if (len !== len2) {
-      console.warn('[crossover] gene length mismatch — falling back to clone of p1');
+    const len = p1.genes.length;
+    if (len !== p2.genes.length) {
+      console.warn('[crossover] gene length mismatch — cloning p1');
       return GeneticAlgorithm._cloneInd(p1);
     }
-
-    // Random cut-point in [1, len-1] so at least one gene comes from each parent
     const point = 1 + Math.floor(Math.random() * (len - 1));
-
     return {
       genes: p1.genes.map((g, i) => GeneticAlgorithm._cloneGene(i < point ? g : p2.genes[i])),
       fitness: 0,
@@ -770,8 +890,7 @@ class GeneticAlgorithm {
     return this.mutateWithRate(individual, this.mutationRate, false);
   }
 
-  // [FIX F6] When stuckWithConflicts is true, allow multi-field mutation per gene
-  // so genes can escape "corners" where multiple dimensions are simultaneously wrong.
+  // [FIX F6 + F9] Constraint-aware mutation
   mutateWithRate(individual, rate, stuckWithConflicts = false) {
     const mutant = {
       genes: individual.genes.map(GeneticAlgorithm._cloneGene),
@@ -782,19 +901,39 @@ class GeneticAlgorithm {
     mutant.genes.forEach(gene => {
       if (Math.random() >= rate) return;
 
+      const validSlots   = this._validSlotsForFaculty.get(gene.facultyId) || [];
+      const requiredRoom = this._courseRoomRestriction.get(gene.courseId);
+
       if (stuckWithConflicts) {
-        // Under conflict pressure: pick multiple fields to change
-        if (Math.random() < 0.5) gene.classroomIdx = Math.floor(Math.random() * this.classrooms.length);
-        if (Math.random() < 0.5) gene.dayIdx       = Math.floor(Math.random() * this.daysOfWeek.length);
-        if (Math.random() < 0.5) gene.timeSlotIdx  = Math.floor(Math.random() * this.timeSlots.length);
-        // Ensure at least one field changed
-        if (Math.random() < 0.33) gene.classroomIdx = Math.floor(Math.random() * this.classrooms.length);
+        // Multi-field mutation, constraint-aware
+        if (Math.random() < 0.7 && validSlots.length > 0) {
+          const pick       = validSlots[Math.floor(Math.random() * validSlots.length)];
+          gene.dayIdx      = pick.dayIdx;
+          gene.timeSlotIdx = pick.timeSlotIdx;
+        } else {
+          if (Math.random() < 0.5) gene.dayIdx      = Math.floor(Math.random() * this.daysOfWeek.length);
+          if (Math.random() < 0.5) gene.timeSlotIdx = Math.floor(Math.random() * this.timeSlots.length);
+        }
+        gene.classroomIdx = requiredRoom !== undefined
+          ? requiredRoom
+          : Math.floor(Math.random() * this.classrooms.length);
       } else {
-        // Normal mutation: exactly one field
-        switch (Math.floor(Math.random() * 3)) {
-          case 0: gene.classroomIdx = Math.floor(Math.random() * this.classrooms.length); break;
-          case 1: gene.dayIdx       = Math.floor(Math.random() * this.daysOfWeek.length); break;
-          case 2: gene.timeSlotIdx  = Math.floor(Math.random() * this.timeSlots.length);  break;
+        // Normal mutation: one field
+        const field = Math.floor(Math.random() * 3);
+        if (field === 0) {
+          gene.classroomIdx = requiredRoom !== undefined
+            ? requiredRoom
+            : Math.floor(Math.random() * this.classrooms.length);
+        } else {
+          // Mutate day+slot together from valid set
+          if (validSlots.length > 0) {
+            const pick       = validSlots[Math.floor(Math.random() * validSlots.length)];
+            gene.dayIdx      = pick.dayIdx;
+            gene.timeSlotIdx = pick.timeSlotIdx;
+          } else {
+            if (field === 1) gene.dayIdx      = Math.floor(Math.random() * this.daysOfWeek.length);
+            else             gene.timeSlotIdx = Math.floor(Math.random() * this.timeSlots.length);
+          }
         }
       }
     });
